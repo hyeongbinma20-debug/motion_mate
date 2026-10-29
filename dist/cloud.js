@@ -1,25 +1,25 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.57.4';
 import {saveBook} from './save-book.js';
+import {projectUrl,publicKey,loadCatalog} from './catalog.js';
 
 // This is a public browser key; authorization is enforced by database policies.
-export const client = createClient('https://owxdsbilstkybwsmnizh.supabase.co','sb_publishable_AeyQcP9L6hYo_2atiJLsrg_w5OgfbB_');
+export const client = createClient(projectUrl,publicKey);
 export const legacyKey = 'bookit.demo.v1';
 let session;
 function check(result) { if(result.error) throw new Error(result.error.message); return result.data; }
 export async function write(action,payload) { check(await client.rpc('bookit_write',{action,payload})); }
 export async function init() { session=check(await client.auth.getSession()).session; return load(); }
 export function currentId() { return session?.user.id || null; }
-export async function load() {
+export async function load(catalog) {
   const signed=!!session;
-  const [profiles,books,requests,contacts]=await Promise.all([
-    client.from('bookit_profiles').select('*').limit(1000).then(check),
-    client.from('bookit_books').select('*').order('created',{ascending:false}).limit(1000).then(check),
+  const [publicData,requests,contacts]=await Promise.all([
+    catalog || loadCatalog(),
     signed?client.from('bookit_requests').select('*').order('created',{ascending:false}).limit(1000).then(check):[],
     signed?client.from('bookit_contacts').select('*').limit(1000).then(check):[],
   ]);
   const contactFor=id=>{const c=contacts.find(c=>c.id===id);return c?{contact:c.value,method:c.method}:{};};
-  return {version:2,users:profiles.map(p=>({id:p.id,...p.doc,...contactFor('profile:'+p.id),...(p.id===currentId()?{email:session.user.email}:{})})),
-    books:books.map(b=>({id:b.id,owner:b.owner,...b.doc,status:b.status,created:b.created,...contactFor(b.id)})),
+  return {version:2,users:publicData.users.map(p=>({...p,...contactFor('profile:'+p.id),...(p.id===currentId()?{email:session.user.email}:{})})),
+    books:publicData.books.map(b=>({...b,...contactFor(b.id)})),
     requests:requests.map(r=>({id:r.id,from:r.sender,to:r.recipient,target:r.target,offered:r.offered,status:r.status,message:r.message,notes:r.notes,confirmations:r.confirmations,created:r.created,closedReason:r.closed_reason}))};
 }
 async function ensureProfile() {
@@ -66,4 +66,9 @@ export async function importLegacy(selected,data){
   }
   return load();
 }
-export async function resume(){session=check(await client.auth.getSession()).session;if(session)await ensureProfile();return load();}
+export async function resume(catalogTask=loadCatalog()) {
+  const [auth,catalog]=await Promise.all([client.auth.getSession(),catalogTask]);
+  session=check(auth).session;
+  if(session&&!catalog.users.some(p=>p.id===currentId())){await ensureProfile();return load();}
+  return load(catalog);
+}
