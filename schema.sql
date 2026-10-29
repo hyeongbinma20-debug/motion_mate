@@ -2,8 +2,8 @@ begin;
 create schema if not exists bookit_private;
 revoke all on schema bookit_private from public;
 create table public.bookit_profiles(id uuid primary key references auth.users(id), doc jsonb not null);
-create table public.bookit_books(id text primary key, owner uuid not null references public.bookit_profiles(id), doc jsonb not null, status text not null default 'available' check(status in ('available','reserved','completed')), created bigint not null);
-create table public.bookit_requests(id text primary key, sender uuid not null references public.bookit_profiles(id), recipient uuid not null references public.bookit_profiles(id), target text not null references public.bookit_books(id), offered text not null references public.bookit_books(id), status text not null default '대기 중' check(status in ('대기 중','수락됨','거절됨','취소됨','교환 완료')), message text not null default '', notes jsonb not null default '{}', confirmations jsonb not null default '[]', created bigint not null, closed_reason text, check(sender <> recipient), check(target <> offered));
+create table public.bookit_books(id text primary key, owner uuid not null references public.bookit_profiles(id), doc jsonb not null, status text not null default 'available' check(status in ('available','reserved','completed','archived')), created bigint not null);
+create table public.bookit_requests(id text primary key, sender uuid not null references public.bookit_profiles(id), recipient uuid not null references public.bookit_profiles(id), target text not null references public.bookit_books(id), offered text not null references public.bookit_books(id), status text not null default '대기 중' check(status in ('대기 중','수락됨','거절됨','취소됨','교환 완료')), message text not null default '', notes jsonb not null default '{}', confirmations jsonb not null default '[]', cancellations jsonb not null default '[]' check(jsonb_typeof(cancellations)='array' and jsonb_array_length(cancellations)<=2), created bigint not null, closed_reason text, check(sender <> recipient), check(target <> offered));
 create table public.bookit_contacts(id text primary key, owner uuid not null references public.bookit_profiles(id), method text not null, value text not null);
 create index bookit_books_owner on public.bookit_books(owner);
 create index bookit_books_created on public.bookit_books(created desc);
@@ -42,13 +42,20 @@ begin
  elsif action='book' then
   if not exists(select 1 from public.bookit_profiles where id=me) then raise exception '프로필을 먼저 저장해주세요.'; end if;
   bid:=payload->>'id';
-  if bid is null or length(bid)>100 or length(trim(coalesce(payload->>'title',''))) not between 1 and 120 or length(coalesce(payload->>'author',''))>80 or length(coalesce(payload->>'description',''))>1500 or length(coalesce(payload->>'terms',''))>300 or coalesce(payload->>'genre','') not in ('소설','에세이','인문','자기계발','예술','과학') or coalesce(payload->>'condition','') not in ('새 책','좋음','사용감 있음') then raise exception '책 제목과 입력 내용을 확인해주세요.'; end if;
+  if bid is null or length(bid)>100 or length(trim(coalesce(payload->>'title',''))) not between 1 and 120 or length(coalesce(payload->>'author',''))>80 or length(coalesce(payload->>'description',''))>1500 or length(coalesce(payload->>'terms',''))>300 or coalesce(payload->>'genre','') not in ('소설','에세이','인문','자기계발','예술','과학','기타') or coalesce(payload->>'condition','') not in ('새 책','좋음','사용감 있음','기타') then raise exception '책 제목과 입력 내용을 확인해주세요.'; end if;
   if (payload ? 'genreDetail' and jsonb_typeof(payload->'genreDetail')<>'string') or (payload ? 'conditionDetail' and jsonb_typeof(payload->'conditionDetail')<>'string') or length(coalesce(payload->>'genreDetail',''))>40 or length(coalesce(payload->>'conditionDetail',''))>300 then raise exception '세부 장르는 40자, 상세 상태는 300자 이내의 글자로 입력해주세요.'; end if;
+  if (payload->>'genre'='기타' and length(trim(coalesce(payload->>'genreDetail','')))=0) or (payload->>'condition'='기타' and length(trim(coalesce(payload->>'conditionDetail','')))=0) then raise exception '기타 항목을 선택하면 세부 장르 또는 상세 상태를 입력해주세요.'; end if;
   select * into b from public.bookit_books where id=bid;
   if found and (b.owner<>me or b.status<>'available') then raise exception '수정할 수 없는 책입니다.'; end if;
   p:=jsonb_build_object('title',trim(payload->>'title'),'author',coalesce(payload->>'author',''),'description',coalesce(payload->>'description',''),'terms',coalesce(payload->>'terms',''),'genre',payload->>'genre','genreDetail',trim(coalesce(payload->>'genreDetail',b.doc->>'genreDetail','')),'condition',payload->>'condition','conditionDetail',trim(coalesce(payload->>'conditionDetail',b.doc->>'conditionDetail','')),'cover',coalesce(payload->>'cover','light'));
   if length(p->>'cover')>2900000 or ((p->>'cover') not in ('light','essay','store','fish','sapiens','winter','sea','art') and (p->>'cover')!~'^data:image/(png|jpeg|webp);base64,') then raise exception '책 표지 형식이나 크기를 확인해주세요.'; end if;
   insert into public.bookit_books(id,owner,doc,created) values(bid,me,p,now_ms) on conflict(id) do update set doc=excluded.doc;
+ elsif action in ('archive','restore') then
+  select * into b from public.bookit_books where id=payload->>'id';
+  if not found or b.owner<>me or (action='archive' and b.status<>'available') or (action='restore' and b.status<>'archived') then raise exception '진행 중이거나 완료된 책의 등록 상태는 변경할 수 없어요.'; end if;
+  update public.bookit_books set status=case when action='archive' then 'archived' else 'available' end where id=b.id;
+  if action='archive' then update public.bookit_requests set status=case when sender=me then '취소됨' else '거절됨' end,closed_reason='책 등록이 종료되어 신청이 마감되었어요.' where status='대기 중' and b.id in (target,offered); end if;
+  return;
  elsif action='delete' then
   select * into b from public.bookit_books where id=payload->>'id';
   if not found or b.owner<>me or b.status<>'available' then raise exception '삭제할 수 없는 책입니다.'; end if;
@@ -67,6 +74,21 @@ begin
  elsif action='transition' then
   select * into r from public.bookit_requests where id=payload->>'id';
   if not found or me not in (r.sender,r.recipient) then raise exception '접근할 수 없는 신청입니다.'; end if;
+  if payload->>'action' in ('합의 취소','취소 철회','취소 거절') then
+   if r.status<>'수락됨' then raise exception '수락된 교환만 합의 취소할 수 있어요.'; end if;
+   if payload->>'action'='합의 취소' then
+    if r.cancellations @> jsonb_build_array(me::text) then raise exception '상대방의 취소 동의를 기다리고 있어요.'; end if;
+    r.cancellations:=r.cancellations||jsonb_build_array(me::text);
+    if jsonb_array_length(r.cancellations)=2 then
+     update public.bookit_requests set status='취소됨',closed_reason='양쪽 사용자가 동의하여 교환을 취소했어요.',cancellations=r.cancellations,confirmations='[]'::jsonb where id=r.id;
+     update public.bookit_books set status='available' where id in (r.target,r.offered) and status='reserved';
+    else update public.bookit_requests set cancellations=r.cancellations where id=r.id; end if;
+   else
+    if jsonb_array_length(r.cancellations)=0 or (payload->>'action'='취소 철회' and not r.cancellations @> jsonb_build_array(me::text)) or (payload->>'action'='취소 거절' and r.cancellations @> jsonb_build_array(me::text)) then raise exception '이 취소 요청을 변경할 수 없어요.'; end if;
+    update public.bookit_requests set cancellations='[]'::jsonb where id=r.id;
+   end if;
+   return;
+  end if;
   if payload->>'action'='수락됨' then
    if me<>r.recipient or r.status<>'대기 중' then raise exception '수락할 수 없는 신청입니다.'; end if;
    if exists(select 1 from public.bookit_books where id in (r.target,r.offered) and status<>'available') then raise exception '이미 예약되거나 완료된 책입니다.'; end if;
@@ -78,6 +100,7 @@ begin
    update public.bookit_requests set status=payload->>'action' where id=r.id;
   elsif payload->>'action'='완료' then
    if r.status<>'수락됨' then raise exception '수락된 신청만 완료할 수 있어요.'; end if;
+   if jsonb_array_length(r.cancellations)>0 then raise exception '취소 요청을 먼저 처리한 뒤 완료할 수 있어요.'; end if;
    if not r.confirmations @> jsonb_build_array(me::text) then r.confirmations:=r.confirmations||jsonb_build_array(me::text); end if;
    update public.bookit_requests set confirmations=r.confirmations,status=case when jsonb_array_length(r.confirmations)=2 then '교환 완료' else '수락됨' end where id=r.id;
    if jsonb_array_length(r.confirmations)=2 then update public.bookit_books set status='completed' where id in (r.target,r.offered); end if;
