@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {loadMedia,clearMedia} from './dist/media.js';
+const realFetch=globalThis.fetch;let count=0;const urls=[];
+globalThis.fetch=async(url,options)=>{count++;urls.push(url);assert.equal(Object.keys(options.headers).join(','),'apikey');return {ok:true,json:async()=>[{image:'light'}]};};
+assert.equal(await loadMedia('book','book-1'),'light');
+assert.equal(await loadMedia('book','book-1'),'light');assert.equal(count,1);
+assert.match(decodeURIComponent(urls[0]),/select=image:doc->>cover/);
+assert.ok(!urls[0].includes('contact'));
+clearMedia();await loadMedia('book','book-1');assert.equal(count,2);
+clearMedia();globalThis.fetch=async()=>({ok:false});await assert.rejects(loadMedia('book','missing'),/사진/);
+clearMedia();globalThis.fetch=async()=>({ok:true,json:async()=>[]});await assert.rejects(loadMedia('profile','missing'),/사진/);
+globalThis.fetch=realFetch;clearMedia();
+console.log('PASS: image-only lookup, duplicate downloads avoided, refresh invalidation, safe image errors');

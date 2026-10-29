@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {loadCatalog,startLoading} from './dist/catalog.js';
+const calls=[];
+const catalog=await loadCatalog(async(url,options)=>{
+  calls.push({url,options});
+  return {ok:true,json:async()=>url.includes('bookit_profiles')?[{id:'reader',nickname:'독자',interests:[]}]:[{id:'book',owner:'reader',status:'available',created:12,title:'테스트 책'}]};
+});
+assert.equal(calls.length,2);assert.ok(calls.every(c=>!c.url.includes('cover')&&!c.url.includes('avatar')&&!c.url.includes('select=*')));
+assert.ok(calls.every(c=>!c.url.includes('contacts')&&!c.url.includes('requests')&&!('Authorization' in c.options.headers)));
+assert.equal(catalog.books[0].title,'테스트 책');assert.deepEqual(catalog.requests,[]);
+let finishAccount;const pending=new Promise(resolve=>finishAccount=resolve),events=[];
+const work=startLoading({catalog:async()=>catalog,account:async publicTask=>{await publicTask;return pending;},onCatalog:d=>events.push(['public',d]),onAccount:d=>events.push(['account',d]),onError:s=>events.push(['error',s])});
+await new Promise(resolve=>setTimeout(resolve,0));
+assert.deepEqual(events,[['public',catalog]],'Public books must appear while account work is still pending');
+finishAccount({users:[],books:[],requests:['private']});await work;
+assert.equal(events[1][0],'account');
+const slowEvents=[];
+await startLoading({catalog:async()=>catalog,account:()=>new Promise(()=>{}),onCatalog:()=>slowEvents.push('public'),onAccount:()=>slowEvents.push('account'),onError:stage=>slowEvents.push(stage+' error'),timeout:15});
+assert.deepEqual(slowEvents,['public','account error']);
+await assert.rejects(loadCatalog(async()=>({ok:false})),/공개 책 목록/);
+await assert.rejects(loadCatalog(async()=>({ok:true,json:async()=>({invalid:true})})),/응답/);
+let aborted=false;
+await assert.rejects(loadCatalog((_url,{signal})=>new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>{aborted=true;reject(new Error('aborted'));})),10),/aborted/);
+assert.ok(aborted);
+const failed=[];
+await startLoading({catalog:async()=>{throw Error('offline');},account:async task=>task,onCatalog:()=>failed.push('public'),onAccount:()=>failed.push('account'),onError:stage=>failed.push(stage)});
+assert.deepEqual(failed.sort(),['account','catalog']);
+console.log('PASS: public catalogue before delayed login, private data excluded, bounded account wait, HTTP/JSON/offline/abort errors');
