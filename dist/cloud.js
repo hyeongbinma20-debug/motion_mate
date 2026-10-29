@@ -1,4 +1,5 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.57.4';
+import {saveBook} from './save-book.js';
 
 // This is a public browser key; authorization is enforced by database policies.
 export const client = createClient('https://owxdsbilstkybwsmnizh.supabase.co','sb_publishable_AeyQcP9L6hYo_2atiJLsrg_w5OgfbB_');
@@ -49,7 +50,7 @@ export async function sync(before,after) {
       return load();
     }
   }
-  for(const b of after.books)if(different(before.books.find(x=>x.id===b.id),b)){await write('book',b);return load();}
+  for(const b of after.books)if(different(before.books.find(x=>x.id===b.id),b))return saveBook(client,write,after,b);
   for(const b of before.books)if(!after.books.some(x=>x.id===b.id)){await write('delete',{id:b.id});return load();}
   const p=after.users.find(x=>x.id===currentId());
   if(p&&different(before.users.find(x=>x.id===p.id),p))await write('profile',p);
