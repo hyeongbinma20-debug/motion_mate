@@ -43,9 +43,10 @@ begin
   if not exists(select 1 from public.bookit_profiles where id=me) then raise exception '프로필을 먼저 저장해주세요.'; end if;
   bid:=payload->>'id';
   if bid is null or length(bid)>100 or length(trim(coalesce(payload->>'title',''))) not between 1 and 120 or length(coalesce(payload->>'author',''))>80 or length(coalesce(payload->>'description',''))>1500 or length(coalesce(payload->>'terms',''))>300 or coalesce(payload->>'genre','') not in ('소설','에세이','인문','자기계발','예술','과학') or coalesce(payload->>'condition','') not in ('새 책','좋음','사용감 있음') then raise exception '책 제목과 입력 내용을 확인해주세요.'; end if;
+  if (payload ? 'genreDetail' and jsonb_typeof(payload->'genreDetail')<>'string') or (payload ? 'conditionDetail' and jsonb_typeof(payload->'conditionDetail')<>'string') or length(coalesce(payload->>'genreDetail',''))>40 or length(coalesce(payload->>'conditionDetail',''))>300 then raise exception '세부 장르는 40자, 상세 상태는 300자 이내의 글자로 입력해주세요.'; end if;
   select * into b from public.bookit_books where id=bid;
   if found and (b.owner<>me or b.status<>'available') then raise exception '수정할 수 없는 책입니다.'; end if;
-  p:=jsonb_build_object('title',trim(payload->>'title'),'author',coalesce(payload->>'author',''),'description',coalesce(payload->>'description',''),'terms',coalesce(payload->>'terms',''),'genre',payload->>'genre','condition',payload->>'condition','cover',coalesce(payload->>'cover','light'));
+  p:=jsonb_build_object('title',trim(payload->>'title'),'author',coalesce(payload->>'author',''),'description',coalesce(payload->>'description',''),'terms',coalesce(payload->>'terms',''),'genre',payload->>'genre','genreDetail',trim(coalesce(payload->>'genreDetail',b.doc->>'genreDetail','')),'condition',payload->>'condition','conditionDetail',trim(coalesce(payload->>'conditionDetail',b.doc->>'conditionDetail','')),'cover',coalesce(payload->>'cover','light'));
   if length(p->>'cover')>2900000 or ((p->>'cover') not in ('light','essay','store','fish','sapiens','winter','sea','art') and (p->>'cover')!~'^data:image/(png|jpeg|webp);base64,') then raise exception '책 표지 형식이나 크기를 확인해주세요.'; end if;
   insert into public.bookit_books(id,owner,doc,created) values(bid,me,p,now_ms) on conflict(id) do update set doc=excluded.doc;
  elsif action='delete' then

@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {validateBookDetails,addConditionExample} from './dist/book-fields.js';
+import {seed,recommend} from './dist/domain.js';
+assert.deepEqual(validateBookDetails({}),{genreDetail:'',conditionDetail:''});
+assert.deepEqual(validateBookDetails({genreDetail:'  한국 추리·독립출판  ',conditionDetail:'  연필 필기 있음\n표지 모서리 접힘  '}),{genreDetail:'한국 추리·독립출판',conditionDetail:'연필 필기 있음\n표지 모서리 접힘'});
+assert.equal(validateBookDetails({genreDetail:'가'.repeat(40),conditionDetail:'가'.repeat(300)}).conditionDetail.length,300);
+assert.throws(()=>validateBookDetails({genreDetail:'가'.repeat(41)}),/40/);
+assert.throws(()=>validateBookDetails({conditionDetail:'가'.repeat(301)}),/300/);
+assert.throws(()=>validateBookDetails({genreDetail:12}),/글자/);
+assert.equal(addConditionExample('필기 없음','표지 접힘'),'필기 없음 / 표지 접힘');
+assert.equal(addConditionExample('표지 접힘','표지 접힘'),'표지 접힘');
+assert.equal(addConditionExample('가'.repeat(300),'표지 접힘'),'가'.repeat(300));
+const data=seed();const reader=data.users[0];reader.keywords='독립출판';
+const candidate=data.books.find(b=>b.owner!==reader.id);candidate.genreDetail='독립출판';
+const item=recommend(data,reader).find(b=>b.id===candidate.id);
+assert.ok(item.reason.includes('관심 키워드'));
+assert.ok(recommend(data,reader).every(b=>b.owner!==reader.id&&b.status==='available'));
+console.log('PASS: custom genre/state text, empty/length/type boundaries, editable examples, duplicate prevention, recommendation keyword compatibility');

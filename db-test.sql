@@ -4,6 +4,20 @@ set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}',true);
 select public.bookit_write('profile','{"nickname":"QA1","contact":"qa-one@example.invalid","method":"이메일"}');
 select public.bookit_write('book','{"id":"qa-book-one","title":"QA ONE","genre":"소설","condition":"좋음","method":"이메일","contact":"qa-one@example.invalid"}');
+-- Optional fields can be saved, edited, cleared, and retained by older clients.
+select public.bookit_write('book','{"id":"qa-book-one","title":"QA ONE","genre":"소설","genreDetail":"추리·미스터리","condition":"좋음","conditionDetail":"밑줄 없음 / 표지 모서리 접힘","method":"이메일","contact":"qa-one@example.invalid"}');
+do $$ begin if (select doc->>'genreDetail' from public.bookit_books where id='qa-book-one')<>'추리·미스터리' or (select doc->>'conditionDetail' from public.bookit_books where id='qa-book-one')<>'밑줄 없음 / 표지 모서리 접힘' then raise exception 'BOOK DETAILS SAVE FAILED'; end if; end $$;
+select public.bookit_write('book','{"id":"qa-book-one","title":"QA ONE","genre":"소설","condition":"좋음","method":"이메일","contact":"qa-one@example.invalid"}');
+do $$ begin if (select doc->>'genreDetail' from public.bookit_books where id='qa-book-one')<>'추리·미스터리' then raise exception 'OLDER CLIENT LOST DETAILS'; end if; end $$;
+select public.bookit_write('book','{"id":"qa-book-one","title":"QA ONE","genre":"소설","genreDetail":"SF·독립출판","condition":"사용감 있음","conditionDetail":"연필 필기 있음, 읽는 데 지장 없음","method":"이메일","contact":"qa-one@example.invalid"}');
+do $$ begin if (select doc->>'genreDetail' from public.bookit_books where id='qa-book-one')<>'SF·독립출판' then raise exception 'BOOK DETAILS EDIT FAILED'; end if; end $$;
+do $$ declare base jsonb:='{"id":"qa-book-one","title":"QA ONE","genre":"소설","condition":"좋음","method":"이메일","contact":"qa-one@example.invalid"}'; begin
+ begin perform public.bookit_write('book',base||jsonb_build_object('genreDetail',repeat('가',41))); raise exception 'LONG GENRE NOT BLOCKED'; exception when others then if sqlerrm<>'세부 장르는 40자, 상세 상태는 300자 이내의 글자로 입력해주세요.' then raise; end if; end;
+ begin perform public.bookit_write('book',base||jsonb_build_object('conditionDetail',repeat('가',301))); raise exception 'LONG CONDITION NOT BLOCKED'; exception when others then if sqlerrm<>'세부 장르는 40자, 상세 상태는 300자 이내의 글자로 입력해주세요.' then raise; end if; end;
+ begin perform public.bookit_write('book',base||'{"genreDetail":123}'::jsonb); raise exception 'NON-TEXT DETAILS NOT BLOCKED'; exception when others then if sqlerrm<>'세부 장르는 40자, 상세 상태는 300자 이내의 글자로 입력해주세요.' then raise; end if; end;
+end $$;
+select public.bookit_write('book','{"id":"qa-book-one","title":"QA ONE","genre":"소설","genreDetail":"","condition":"좋음","conditionDetail":"","method":"이메일","contact":"qa-one@example.invalid"}');
+do $$ begin if (select doc->>'genreDetail' from public.bookit_books where id='qa-book-one')<>'' or (select doc->>'conditionDetail' from public.bookit_books where id='qa-book-one')<>'' then raise exception 'BOOK DETAILS CLEAR FAILED'; end if; end $$;
 select set_config('request.jwt.claims','{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}',true);
 select public.bookit_write('profile','{"nickname":"QA2","contact":"qa-two@example.invalid","method":"이메일"}');
 select public.bookit_write('book','{"id":"qa-book-two","title":"QA TWO","genre":"소설","condition":"좋음","method":"이메일","contact":"qa-two@example.invalid"}');
@@ -22,4 +36,4 @@ select set_config('request.jwt.claims','{"sub":"33333333-3333-4333-8333-33333333
 do $$ begin if exists(select 1 from public.bookit_contacts where id in ('qa-book-one','qa-book-two')) or exists(select 1 from public.bookit_requests where target='qa-book-one') then raise exception 'THIRD PARTY ACCESS FAILED'; end if; end $$;
 reset role;
 rollback;
-select 'PASS: profile/book creation, hidden contacts, proposal, duplicate prevention, acceptance, contact disclosure, notes, two-sided completion, unrelated-user isolation; all test rows rolled back' as result;
+select 'PASS: custom book details save/edit/clear, older-client preservation, bounds validation, profile/book creation, hidden contacts, proposal, duplicate prevention, acceptance, contact disclosure, notes, two-sided completion, unrelated-user isolation; all test rows rolled back' as result;
