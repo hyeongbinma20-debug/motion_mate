@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import {saveBook} from './dist/save-book.js';
+
+const other={id:'other',title:'다른 사용자의 책',cover:'unchanged'};
+const book={id:'new-book',owner:'me',title:'테스트 책',cover:'large-image',contact:'qa@example.invalid',method:'이메일',status:'available',created:1};
+const state={users:[{id:'me'}],books:[book,other],requests:[]};
+let writes=0,reads=0,selection,filter;
+const write=async(action,payload)=>{assert.equal(action,'book');assert.equal(payload,book);writes++;};
+const client={from(table){assert.equal(table,'bookit_books');reads++;return {select(columns){selection=columns;return this;},eq(column,id){filter=[column,id];return this;},async single(){return {data:{id:book.id,owner:'me',status:'available',created:1234},error:null};}};}};
+const saved=await saveBook(client,write,state,book);
+assert.equal(writes,1);assert.equal(reads,1);
+assert.equal(selection,'id,owner,status,created');assert.deepEqual(filter,['id',book.id]);
+assert.equal(saved.books[0].created,1234);assert.equal(saved.books[0].cover,book.cover);
+assert.equal(saved.books[1],other);assert.equal(saved.users,state.users);assert.equal(saved.requests,state.requests);
+assert.equal(state.books[0].created,1);
+const failedRead={from(){return {select(){return this;},eq(){return this;},async single(){return {data:null,error:new Error('offline')};}};}};
+const retained=await saveBook(failedRead,async()=>{},state,book);
+assert.equal(retained.books[0],book);assert.match(retained.syncWarning,/저장됐어요/);
+let queried=false;
+await assert.rejects(saveBook({from(){queried=true;}},async()=>{throw new Error('수정 권한 없음');},state,book),/수정 권한 없음/);
+assert.equal(queried,false);
+console.log('PASS: one-book metadata refresh, no unrelated downloads, authoritative status, retained cover and contacts, successful-save recovery, write rejection');
