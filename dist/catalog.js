@@ -24,7 +24,7 @@ export async function loadCatalog(fetcher = fetch, timeout = 12000) {
   try {
     const [profiles, books] = await Promise.all([
       read('bookit_profiles', 'select=id,nickname:doc->>nickname,bio:doc->>bio,interests:doc->interests,keywords:doc->>keywords&limit=1000'),
-      read('bookit_books', 'select=id,owner,status,created,title:doc->>title,author:doc->>author,description:doc->>description,genre:doc->>genre,condition:doc->>condition,terms:doc->>terms&order=created.desc&limit=1000'),
+      read('bookit_books', 'select=id,owner,status,created,title:doc->>title,author:doc->>author,description:doc->>description,genre:doc->>genre,genreDetail:doc->>genreDetail,condition:doc->>condition,conditionDetail:doc->>conditionDetail,terms:doc->>terms&order=created.desc&limit=1000'),
     ]);
     return {version:2, users:profiles.map(p => ({...p,interests:p.interests||[],keywords:p.keywords||''})),
       books, requests:[]};
