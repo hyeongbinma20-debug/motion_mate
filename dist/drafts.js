@@ -1,5 +1,6 @@
+import {INFO_FIELDS} from './book-info.js?v=20261030-ai1';
 const prefix='bookit.book-draft.v1:';
-const fields=['title','author','genre','genreDetail','condition','conditionDetail','description','terms','method','contact'];
+const fields=['title','author','genre','genreDetail','condition','conditionDetail','description','terms','method','contact',...INFO_FIELDS];
 export const draftKey=(user,id='new')=>prefix+encodeURIComponent(user)+':'+encodeURIComponent(id||'new');
 export function cleanDraft(values,cover){
   const result={version:1,fields:{}};

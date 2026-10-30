@@ -1,7 +1,7 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.57.4';
 import {favoriteService} from './library.js?v=20261030-library1';
 import {saveBook} from './save-book.js';
-import {projectUrl,publicKey,loadCatalog} from './catalog.js';
+import {projectUrl,publicKey,loadCatalog} from './catalog.js?v=20261030-ai1';
 import {recoveryService,authMessage} from './recovery.js';
 
 // This is a public browser key; authorization is enforced by database policies.
@@ -15,7 +15,7 @@ export const canResetPassword=()=>recovery.allowed(currentId());
 export const requestPasswordReset=email=>recovery.request(email);
 export async function resetPassword(password,confirmation){await recovery.update(currentId(),password,confirmation);check(await client.auth.signOut({scope:'local'}));session=null;return load();}
 function check(result) { if(result.error) throw new Error(authMessage(result.error)); return result.data; }
-export async function write(action,payload) { check(await client.rpc('bookit_write',{action,payload})); }
+export async function write(action,payload) { check(await client.rpc(action==='book'&&Object.hasOwn(payload,'metadata')?'bookit_write_book':'bookit_write',action==='book'&&Object.hasOwn(payload,'metadata')?{payload}:{action,payload})); }
 export async function init() { session=check(await client.auth.getSession()).session; return load(); }
 export function currentId() { return session?.user.id || null; }
 const favorites=favoriteService(client,currentId);
@@ -88,4 +88,18 @@ export async function resume(catalogTask=loadCatalog()) {
   session=check(auth).session;
   if(session&&!catalog.users.some(p=>p.id===currentId())){await ensureProfile();return load();}
   return load(catalog);
+}
+
+// User JWTs authenticate requests; provider keys exist only inside the Edge Function.
+export async function aiRequest(payload){
+  const active=check(await client.auth.getSession()).session;
+  if(!active?.access_token)throw Error('로그인한 뒤 AI 기능을 이용해주세요.');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);
+  try{
+    const response=await fetch(projectUrl+'/functions/v1/bookit-ai',{method:'POST',headers:{apikey:publicKey,Authorization:'Bearer '+active.access_token,'Content-Type':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
+    let result;try{result=await response.json();}catch{throw Error('AI 서버에 연결하지 못했어요. 직접 입력하거나 다시 시도해주세요.');}
+    if(!response.ok){const message=result.code==='AI_SETUP_REQUIRED'?'AI 기능 연결을 준비 중이에요. 직접 입력과 기존 추천은 계속 이용할 수 있어요.':result.code==='BOOK_SEARCH_SETUP_REQUIRED'?'도서 검색 연결을 준비 중이에요. 책 정보는 직접 입력할 수 있어요.':typeof result.code==='string'&&typeof result.message==='string'?result.message.slice(0,300):response.status===401?'로그인 상태를 확인하고 다시 로그인해주세요.':'AI 서버 설정이나 연결을 확인해주세요. 기존 직접 입력과 추천은 계속 이용할 수 있어요.';const error=new Error(message);error.code=result.code;error.retryAfter=Math.max(0,Math.min(86400,Number(result.retryAfter)||0));throw error;}
+    return result;
+  }catch(error){if(error.name==='AbortError')throw Error('AI 응답이 지연되고 있어요. 입력한 내용은 유지돼요. 잠시 후 다시 시도해주세요.');throw error;}
+  finally{clearTimeout(timer);}
 }
