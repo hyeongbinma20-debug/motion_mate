@@ -2,6 +2,16 @@ import {projectUrl,publicKey} from './catalog.js';
 const cache=new Map();
 let observer;
 export function clearMedia(){cache.clear();}
+export function preloadMedia(kind,ids){
+  const pending=[...new Set(ids)].filter(id=>typeof id==='string'&&/^[\w-]{1,160}$/.test(id)&&!cache.has(kind+':'+id));
+  for(let offset=0;offset<pending.length;offset+=24){
+    const batch=pending.slice(offset,offset+24),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+    const field=kind==='book'?'cover':'avatar',table=kind==='book'?'bookit_books':'bookit_profiles';
+    const query=new URLSearchParams({select:`id,image:doc->>${field}`,id:'in.('+batch.join(',')+')',limit:String(batch.length)});
+    const task=fetch(`${projectUrl}/rest/v1/${table}?${query}`,{headers:{apikey:publicKey},signal:controller.signal}).then(async response=>{if(!response.ok)throw Error('사진을 불러오지 못했어요.');const rows=await response.json();if(!Array.isArray(rows))throw Error('사진 응답을 확인하지 못했어요.');return new Map(rows.map(row=>[row.id,row.image||'']));}).finally(()=>clearTimeout(timer));
+    for(const id of batch){const item=task.then(rows=>{if(!rows.has(id))throw Error('사진 정보를 찾을 수 없어요.');return rows.get(id);});item.catch(()=>{});cache.set(kind+':'+id,item);}
+  }
+}
 export function loadMedia(kind,id){
   const key=kind+':'+id;
   if(!cache.has(key))cache.set(key,(async()=>{
@@ -39,7 +49,8 @@ export function hydrateMedia(root,data){
     catch {if(node.isConnected)node.title='사진을 불러오지 못했어요. 목록 새로고침으로 다시 시도해주세요.';}
   };
   const nodes=root.querySelectorAll('[data-book-cover],[data-profile-avatar]');
-  if(!('IntersectionObserver' in window)){nodes.forEach(hydrate);return;}
-  observer=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){observer.unobserve(entry.target);hydrate(entry.target);}},{rootMargin:'160px'});
+  const group=visible=>{for(const kind of ['book','profile'])preloadMedia(kind,visible.filter(node=>kind==='book'?node.dataset.bookCover:node.dataset.profileAvatar).map(node=>node.dataset.bookCover||node.dataset.profileAvatar));visible.forEach(hydrate);};
+  if(!('IntersectionObserver' in window)){group([...nodes]);return;}
+  observer=new IntersectionObserver(entries=>{const visible=[];for(const entry of entries)if(entry.isIntersecting){observer.unobserve(entry.target);visible.push(entry.target);}group(visible);},{rootMargin:'160px'});
   nodes.forEach(node=>observer.observe(node));
 }

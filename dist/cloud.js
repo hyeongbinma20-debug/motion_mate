@@ -7,14 +7,15 @@ import {recoveryService,authMessage} from './recovery.js';
 // This is a public browser key; authorization is enforced by database policies.
 export const client = createClient(projectUrl,publicKey);
 export const legacyKey = 'bookit.demo.v1';
-let session;
+let session,explicitSignOut=false;
 let recoveryStorage;try{recoveryStorage=sessionStorage;}catch{recoveryStorage={getItem:()=>null,setItem(){},removeItem(){}};}
 const recovery=recoveryService(client,recoveryStorage);
-client.auth.onAuthStateChange((event,value)=>{recovery.event(event,value);if(event==='PASSWORD_RECOVERY'){session=value;window.dispatchEvent(new Event('bookit:recovery'));}});
+client.auth.onAuthStateChange((event,value)=>{const ended=!!session&&!value&&event==='SIGNED_OUT'&&!explicitSignOut;session=value;recovery.event(event,value);if(event==='PASSWORD_RECOVERY')window.dispatchEvent(new Event('bookit:recovery'));if(ended)queueMicrotask(()=>window.dispatchEvent(new Event('bookit:session-ended')));});
 export const canResetPassword=()=>recovery.allowed(currentId());
 export const requestPasswordReset=email=>recovery.request(email);
-export async function resetPassword(password,confirmation){await recovery.update(currentId(),password,confirmation);check(await client.auth.signOut({scope:'local'}));session=null;return load();}
+export async function resetPassword(password,confirmation){await recovery.update(currentId(),password,confirmation);await signOut({scope:'local'});session=null;return load();}
 function check(result) { if(result.error) throw new Error(authMessage(result.error)); return result.data; }
+async function signOut(options){explicitSignOut=true;try{return check(await client.auth.signOut(options));}finally{explicitSignOut=false;}}
 export async function write(action,payload) { check(await client.rpc(action==='book'&&Object.hasOwn(payload,'metadata')?'bookit_write_book':'bookit_write',action==='book'&&Object.hasOwn(payload,'metadata')?{payload}:{action,payload})); }
 export async function init() { session=check(await client.auth.getSession()).session; return load(); }
 export function currentId() { return session?.user.id || null; }
@@ -44,7 +45,7 @@ export async function signup(email,password,nickname) {
   if(session){await ensureProfile();return load();}
   return null;
 }
-export async function logout() { check(await client.auth.signOut());recovery.clear();session=null;try{return await load();}catch{return {version:2,users:[],books:[],requests:[],loadWarning:'로그아웃은 완료됐어요. 목록 새로고침으로 책을 다시 불러와주세요.'};} }
+export async function logout() { await signOut();recovery.clear();session=null;try{return await load();}catch{return {version:2,users:[],books:[],requests:[],loadWarning:'로그아웃은 완료됐어요. 목록 새로고침으로 책을 다시 불러와주세요.'};} }
 export async function verify(email,token){session=check(await client.auth.verifyOtp({email,token,type:'signup'})).session;await ensureProfile();return load();}
 
 // Convert the existing UI's single user action to an explicit server command.
@@ -98,6 +99,7 @@ export async function aiRequest(payload){
   try{
     const response=await fetch(projectUrl+'/functions/v1/bookit-ai',{method:'POST',headers:{apikey:publicKey,Authorization:'Bearer '+active.access_token,'Content-Type':'application/json'},body:JSON.stringify(payload),signal:controller.signal});
     let result;try{result=await response.json();}catch{throw Error('AI 서버에 연결하지 못했어요. 직접 입력하거나 다시 시도해주세요.');}
+    if(response.status===401){session=null;window.dispatchEvent(new Event('bookit:session-ended'));}
     if(!response.ok){const message=result.code==='AI_SETUP_REQUIRED'?'AI 기능 연결을 준비 중이에요. 직접 입력과 기존 추천은 계속 이용할 수 있어요.':result.code==='BOOK_SEARCH_SETUP_REQUIRED'?'도서 검색 연결을 준비 중이에요. 책 정보는 직접 입력할 수 있어요.':typeof result.code==='string'&&typeof result.message==='string'?result.message.slice(0,300):response.status===401?'로그인 상태를 확인하고 다시 로그인해주세요.':'AI 서버 설정이나 연결을 확인해주세요. 기존 직접 입력과 추천은 계속 이용할 수 있어요.';const error=new Error(message);error.code=result.code;error.retryAfter=Math.max(0,Math.min(86400,Number(result.retryAfter)||0));throw error;}
     return result;
   }catch(error){if(error.name==='AbortError')throw Error('AI 응답이 지연되고 있어요. 입력한 내용은 유지돼요. 잠시 후 다시 시도해주세요.');throw error;}
