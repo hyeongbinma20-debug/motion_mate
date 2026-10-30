@@ -1,4 +1,5 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.57.4';
+import {favoriteService} from './library.js?v=20261030-library1';
 import {saveBook} from './save-book.js';
 import {projectUrl,publicKey,loadCatalog} from './catalog.js';
 import {recoveryService,authMessage} from './recovery.js';
@@ -17,6 +18,9 @@ function check(result) { if(result.error) throw new Error(authMessage(result.err
 export async function write(action,payload) { check(await client.rpc('bookit_write',{action,payload})); }
 export async function init() { session=check(await client.auth.getSession()).session; return load(); }
 export function currentId() { return session?.user.id || null; }
+const favorites=favoriteService(client,currentId);
+export const loadFavorites=()=>favorites.list();
+export const setFavorite=(id,saved)=>favorites.set(id,saved);
 export async function load(catalog) {
   const signed=!!session;
   const [publicData,requests,contacts]=await Promise.all([
