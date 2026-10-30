@@ -21,7 +21,7 @@ assert.throws(()=>validatePicks({picks:[{id:'imaginary',reasonCodes:[]}]},[actua
 const parse={intent:'search',required,preferred:emptyFilter(),questionField:null};
 function setup(options={}){
  let models=0,finalReads=0,calls=[];
- const variables={SUPABASE_URL:'https://project.test',SUPABASE_ANON_KEY:'test-public',SUPABASE_SERVICE_ROLE_KEY:'test-admin-secret',OPENAI_API_KEY:options.noKey?'':'test-ai-secret',GOOGLE_BOOKS_API_KEY:options.noBookKey?'':'test-google-secret'};
+ const variables={SUPABASE_URL:'https://project.test',SUPABASE_ANON_KEY:'test-public',SUPABASE_SERVICE_ROLE_KEY:'test-admin-secret',OPENAI_API_KEY:options.noKey?'':'test-ai-secret',BAZE_API_KEY:options.baze?'test-school-secret':'',GOOGLE_BOOKS_API_KEY:options.noBookKey?'':'test-google-secret'};
  const handler=createAIHandler({env:name=>variables[name],fetcher:async(url,init={})=>{
   const body=init.body?JSON.parse(init.body):null;calls.push({url,body,headers:init.headers});
   const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
@@ -31,7 +31,8 @@ function setup(options={}){
   if(url.includes('/bookit_books?')&&!url.includes('id=in.'))return json([{genre:'소설'}]);
   if(url.endsWith('/rpc/bookit_ai_candidates')){assert.equal(init.headers.Authorization,'Bearer valid-user-token');return json(options.noCandidates?[]:[row,{...row,id:'own-book',owner:uid},{...row,id:'closed-book',status:'completed'}]);}
   if(url.includes('/bookit_books?')&&url.includes('id=in.')){finalReads++;return json(options.changedStatus?[{...row,status:'reserved'}]:options.changedPages?[{...row,info:{...row.info,page_count:900}}]:[row]);}
-  if(url.startsWith('https://api.openai.com/')){
+  if(url.startsWith('https://api.openai.com/')||url.startsWith('https://factchat-cloud.mindlogic.ai/')){
+   assert.equal(url,options.baze?'https://factchat-cloud.mindlogic.ai/v1/gateway/responses/':'https://api.openai.com/v1/responses');assert.equal(init.headers.Authorization,'Bearer '+(options.baze?'test-school-secret':'test-ai-secret'));assert.equal(init.redirect,'error');assert.equal(body.model,options.baze?'gpt-5.6-luna':'gpt-4.1-mini');if(options.baze){assert.equal(body.reasoning.effort,'low');assert.ok(body.max_output_tokens>2048);}assert.ok(!JSON.stringify(body).includes('test-school-secret'));
    models++;assert.equal(body.store,false);assert.equal(body.text.format.type,'json_schema');assert.equal(body.text.format.strict,true);assert.match(body.instructions,/信頼|신뢰할 수 없는 데이터/);assert.ok(!JSON.stringify(body).includes('test-ai-secret'));assert.ok(!JSON.stringify(body).includes('test-admin-secret'));assert.equal(body.tools,undefined);
    let value;if(body.text.format.name==='book_cover_read')value={readable:true,title:'조회된 제목',author:'조회된 저자'};
    else if(body.text.format.name==='book_preferences')value=options.noNewConditions?{intent:'search',required:emptyFilter(),preferred:emptyFilter(),questionField:null}:options.ask?{intent:'clarify',required:emptyFilter(),preferred:emptyFilter(),questionField:'genres'}:parse;
@@ -44,7 +45,8 @@ function setup(options={}){
  const call=async(payload,headers={})=>{const response=await handler(new Request('https://project.test/functions/v1/bookit-ai',{method:'POST',headers:{Origin:'https://hyeongbinma20-debug.github.io',Authorization:'Bearer valid-user-token','Content-Type':'application/json',...headers},body:JSON.stringify(payload)}));return {response,body:await response.json()};};
  return {handler,call,calls,get models(){return models;},get finalReads(){return finalReads;}};
 }
-let test=setup(),result=await test.call({mode:'chat',message:'마포 직거래와 300쪽 이하는 필수야. 소설 추천해줘.',state:normalizeState(),userId:other});assert.equal(result.response.status,200);assert.equal(test.models,2);assert.equal(result.body.books.length,1);assert.equal(result.body.books[0].title,'DB 제목');assert.ok(!('cover' in result.body.books[0]));assert.ok(!result.body.books[0].reasonCodes.includes('invented'));assert.ok(!JSON.stringify(result.body).includes('test-ai-secret'));
+let test=setup({baze:true,noKey:true}),result=await test.call({mode:'chat',message:'소설 추천',state:normalizeState()});assert.equal(result.response.status,200);assert.equal(test.models,2);assert.equal(result.body.books[0].title,'DB 제목');assert.ok(!JSON.stringify(result.body).includes('test-school-secret'));result=await test.call({mode:'photo',image:photo});assert.equal(result.response.status,200);result=await test.call({mode:'capabilities'});assert.equal(result.body.ai,true);
+test=setup();result=await test.call({mode:'chat',message:'마포 직거래와 300쪽 이하는 필수야. 소설 추천해줘.',state:normalizeState(),userId:other});assert.equal(result.response.status,200);assert.equal(test.models,2);assert.equal(result.body.books.length,1);assert.equal(result.body.books[0].title,'DB 제목');assert.ok(!('cover' in result.body.books[0]));assert.ok(!result.body.books[0].reasonCodes.includes('invented'));assert.ok(!JSON.stringify(result.body).includes('test-ai-secret'));
 test=setup({fakeId:true});result=await test.call({mode:'chat',message:'추천',state:normalizeState()});assert.equal(result.response.status,502);assert.equal(result.body.code,'INVALID_AI_RESULT');assert.equal(test.finalReads,0);
 for(const option of ['changedStatus','changedPages']){test=setup({[option]:true});result=await test.call({mode:'chat',message:'추천'});assert.equal(result.body.books.length,0);}
 test=setup({noCandidates:true});result=await test.call({mode:'chat',message:'추천'});assert.equal(test.models,1);assert.equal(result.body.books.length,0);assert.ok(result.body.relaxations.includes('region'));

@@ -4,6 +4,8 @@
 
 ## 1. 서버 키 등록
 
+학교 BAZE 키를 사용하는 경우 Supabase Secrets에 `BAZE_API_KEY`로 등록하세요. `BAZE_MODEL`은 선택 사항이며 기본값은 `gpt-5.6-luna`입니다. BAZE 키가 있으면 공식 학교 Gateway `https://factchat-cloud.mindlogic.ai/v1/gateway/responses/`로만 요청하며, 일반 OpenAI 키와 주소를 혼용하지 않습니다. 기존 직접 OpenAI 연결도 유지합니다. 도서 검색에는 별도의 `GOOGLE_BOOKS_API_KEY`가 필요합니다. BAZE 사용량은 키를 발급한 학교 BAZE 계정에 반영됩니다. Codex 자체 모델·전역 설정은 변경하지 않습니다. [학교 Gateway 공식 안내](https://docs.mindlogic.ai/agent-setup/prompt.md)
+
 발급한 키 값은 채팅으로 보내지 말고 [이 프로젝트의 Supabase Secrets](https://supabase.com/dashboard/project/owxdsbilstkybwsmnizh/functions/secrets)에 직접 등록하세요.
 
 | Name | Value | 필요한 기능 |
