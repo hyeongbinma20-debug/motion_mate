@@ -18,21 +18,21 @@ export function bindBookAI(form,{request,cover,changed,esc}){
  const current=()=>form.isConnected;
  const review=()=>{const required=field('aiReviewed').value==='0';el('book-ai-reviewed').checked=!required;el('book-ai-reviewed').required=required;form.querySelector('.book-ai-review').hidden=!required;if(required)form.querySelector('.bibliographic').open=true;};
  const paintTags=()=>form.querySelectorAll('[data-info-target]').forEach(button=>{const values=field(button.dataset.infoTarget).value.split(',');button.classList.toggle('active',values.includes(button.dataset.infoValue));button.setAttribute('aria-pressed',String(values.includes(button.dataset.infoValue)));});
- const ready=()=>{const photo=/^data:image\/(jpeg|png|webp);base64,/.test(cover());el('ai-fill-book').disabled=busy||!photo||!!form.querySelector('button.primary:disabled');el('book-lookup-submit').disabled=busy;el('book-ai-photo-help').textContent=photo?'첨부한 사진으로 조회한 뒤, 같은 도서를 선택해 적용해주세요.':'표지 사진을 먼저 첨부하거나 제목으로 직접 검색해주세요.';};
+ const ready=()=>{const photo=/^data:image\/(jpeg|png|webp);base64,/.test(cover());el('ai-fill-book').disabled=busy||!photo||!!form.querySelector('button.primary:disabled');el('book-lookup-submit').disabled=busy;el('book-ai-photo-help').textContent=photo?'첨부한 사진으로 조회한 뒤, 같은 도서를 선택하면 아래 입력칸이 자동으로 채워져요.':'표지 사진을 먼저 첨부하거나 제목으로 직접 검색해주세요.';};
  const updateCooldown=()=>{const remaining=Math.max(0,Math.ceil((cooldown-Date.now())/1000));el('retry-book-ai').disabled=busy||remaining>0;el('retry-book-ai').textContent=remaining?`${remaining}초 후 재시도`:'다시 시도';if(!current()||!remaining)clearInterval(timer);};
  const renderCandidates=()=>{
-  el('book-ai-candidates').innerHTML=candidates.length?`<fieldset><legend>표지와 같은 도서를 선택해주세요</legend><p class="hint">제목·저자·도서 정보·소개가 선택한 도서 정보로 바뀝니다. 책 상태·교환 조건·연락처는 유지돼요.</p>${candidates.map((b,i)=>`<button type="button" class="book-candidate ${selected===i?'selected':''}" data-book-candidate="${i}" aria-pressed="${selected===i}"><strong>${esc(b.title)}</strong><span>${esc(b.author||'저자 정보 없음')} · ${esc(b.metadata.publisher||'출판사 정보 없음')}</span><small>ISBN ${esc(b.metadata.isbn||'정보 없음')} · ${esc(b.metadata.category||'분류 정보 없음')}</small><small>${esc(b.description||'조회된 책 소개가 없어요. 소개는 직접 입력할 수 있어요.')}</small></button>`).join('')}<button type="button" class="secondary" id="apply-book-candidate" ${selected<0?'disabled':''}>선택한 도서 정보로 채우기</button><small>정보 출처: Google Books · 자동 등록되지 않아요.</small></fieldset>`:'';
-  form.querySelectorAll('[data-book-candidate]').forEach(button=>button.onclick=()=>{selected=Number(button.dataset.bookCandidate);renderCandidates();});
-  if(el('apply-book-candidate'))el('apply-book-candidate').onclick=()=>{
+  el('book-ai-candidates').innerHTML=candidates.length?`<fieldset><legend>표지와 같은 도서를 선택해주세요</legend><p class="hint">도서를 선택하면 제목·저자·ISBN·출판사·분류·쪽수·소개가 아래 입력칸에 자동으로 채워져요. 입력된 내용은 수정할 수 있고, 책 상태·교환 조건·연락처는 유지돼요.</p>${candidates.map((b,i)=>`<button type="button" class="book-candidate ${selected===i?'selected':''}" data-book-candidate="${i}" aria-pressed="${selected===i}"><strong>${esc(b.title)}</strong><span>${esc(b.author||'저자 정보 없음')} · ${esc(b.metadata.publisher||'출판사 정보 없음')}</span><small>ISBN ${esc(b.metadata.isbn||'정보 없음')} · ${esc(b.metadata.category||'분류 정보 없음')}</small><small>${esc(b.description||'조회된 책 소개가 없어요. 소개는 직접 입력할 수 있어요.')}</small></button>`).join('')}<small>정보 출처: Google Books · 확인 후 책 등록하기를 눌러주세요.</small></fieldset>`:'';
+  form.querySelectorAll('[data-book-candidate]').forEach(button=>button.onclick=()=>applyCandidate(Number(button.dataset.bookCandidate)));
+ };
+ function applyCandidate(index){
    if(!current())return;if(lastMode==='photo'&&cover()!==referenceCover){el('book-ai-error').textContent='사진이 바뀌었어요. 새 사진으로 다시 조회해주세요.';return;}
-   const b=candidates[selected];if(!b)return;
+   const b=candidates[index];if(!b)return;
    if([field('title').value,field('author').value,field('description').value].some(v=>v.trim())&&!confirm('입력한 제목·저자·소개와 도서 부가정보를 선택한 도서 정보로 바꿀까요? 책 상태와 교환 조건은 유지돼요.'))return;
    const info=normalizeInfo(b.metadata);
    for(const [name,value] of Object.entries({title:b.title,author:b.author,description:b.description,infoIsbn:info.isbn,infoPublisher:info.publisher,infoCategory:info.category,infoPages:info.pageCount||'',infoSource:info.source,infoSourceId:info.sourceId,aiReviewed:'0'}))field(name).value=value;
    if(b.genre){field('genre').value=b.genre;field('genreDetail').value=info.category.slice(0,40);field('genre').dispatchEvent(new Event('change',{bubbles:true}));}
-   form.querySelector('.bibliographic').open=true;review();changed();el('book-ai-status').textContent='도서 정보를 채웠어요. 제목·저자·소개와 ISBN·출판사·분류·쪽수를 확인하고 수정해주세요.';field('title').focus();
-  };
- };
+   selected=index;renderCandidates();form.querySelector('.bibliographic').open=true;review();changed();el('book-ai-status').textContent='선택한 도서 정보를 자동으로 입력했어요. 아래에서 확인하거나 수정한 뒤 등록해주세요.';field('title').focus();
+ }
  async function run(mode){
   if(busy)return;if(cooldown>Date.now()){el('book-ai-error').textContent='호출 한도가 풀린 뒤 다시 시도해주세요. 직접 입력은 계속 가능해요.';return;}
   const query=el('book-lookup-query').value.trim();if(mode==='photo'&&!/^data:image\//.test(cover()))return;if(mode==='lookup'&&query.length<2){el('book-ai-error').textContent='책 제목이나 ISBN을 두 글자 이상 입력해주세요.';return;}

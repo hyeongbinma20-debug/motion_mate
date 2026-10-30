@@ -1,4 +1,4 @@
-import {bookAISection,bibliographicFields,exchangeInfoFields,detailBookInfo,bindBookAI,setAIAccount,renderAIChat,bindAIChat} from './ai-ui.js?v=20261030-ai1';
+import {bookAISection,bibliographicFields,exchangeInfoFields,detailBookInfo,bindBookAI,setAIAccount,renderAIChat,bindAIChat} from './ai-ui.js?v=20261030-autofill1';
 import {infoFromFields,INFO_FIELDS} from './book-info.js?v=20261030-ai1';
 import {seed,genres,conditions,uid,recommend,propose,transition,contacts,setListingState} from './domain.js?v=20261030-market1';
 import {loadCatalog,startLoading,deadline} from './catalog.js?v=20261030-ai1';
