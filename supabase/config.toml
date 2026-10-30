@@ -1,0 +1,4 @@
+[functions.bookit-ai]
+# Preserve the deployed project gateway verification. The handler additionally
+# verifies the caller with Supabase Auth on every request before any operation.
+verify_jwt = true
