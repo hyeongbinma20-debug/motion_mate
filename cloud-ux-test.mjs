@@ -1,9 +1,10 @@
+import {favoriteService} from './dist/library.js';
 import assert from 'node:assert/strict';import vm from 'node:vm';import {readFile} from 'node:fs/promises';
 import {seed,setListingState,propose,transition} from './dist/domain.js';
 let catalog=seed(),calls=[];
 const client={auth:{onAuthStateChange(){},async getSession(){return {data:{session:{user:{id:'u1',email:'qa@example.invalid'}}}};}},async rpc(name,{action,payload}){calls.push({action,payload});return {data:null};},from(table){return {select(){return this;},order(){return this;},limit(){return Promise.resolve({data:[]});}};}};
 let source=await readFile(new URL('./dist/cloud.js',import.meta.url),'utf8');source=source.replace(/^import .*;\r?\n/gm,'').replace(/export /g,'');
-const context=vm.createContext({createClient:()=>client,projectUrl:'test',publicKey:'test',loadCatalog:async()=>structuredClone(catalog),saveBook:async()=>{throw Error('Listing state must use its own atomic server command');},authMessage:e=>e.message,recoveryService:()=>({event(){},allowed:()=>false}),sessionStorage:{},window:{dispatchEvent(){}},Event:class{}});
+const context=vm.createContext({favoriteService,createClient:()=>client,projectUrl:'test',publicKey:'test',loadCatalog:async()=>structuredClone(catalog),saveBook:async()=>{throw Error('Listing state must use its own atomic server command');},authMessage:e=>e.message,recoveryService:()=>({event(){},allowed:()=>false}),sessionStorage:{},window:{dispatchEvent(){}},Event:class{}});
 vm.runInContext(source+';this.api={sync,resume};',context);await context.api.resume();
 const before=seed();propose(before,'u2','b7','b1','pending');const after=structuredClone(before);setListingState(after,'b7','u1','archived');catalog=after;await context.api.sync(before,after);assert.deepEqual(calls.map(c=>c.action),['archive']);assert.equal(calls[0].payload.id,'b7');
 calls=[];const restore=structuredClone(after);setListingState(restore,'b7','u1','available');catalog=restore;await context.api.sync(after,restore);assert.deepEqual(calls.map(c=>c.action),['restore']);
